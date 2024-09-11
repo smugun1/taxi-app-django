@@ -1,0 +1,282 @@
+from datetime import timezone
+from django.http import JsonResponse
+from rest_framework import generics, status
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.views import APIView
+from rest_framework.decorators import api_view
+from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from django.contrib.auth import get_user_model
+from django.conf import settings
+from django.shortcuts import render
+import stripe
+
+# from django.views import View
+from registration.backends.default.views import RegistrationView
+
+from .models import CustomUser, DriverLicense, Ride, Vehicle, Transaction
+from .serializers import (
+    CustomRegisterSerializer,
+    CustomUserSerializer,
+    DriverLicenseSerializer,
+    RegisterSerializer,
+    RideSerializer,
+    TransactionSerializer,
+    VehicleSerializer
+)
+from users import serializers
+# Remove the redundant import of 'serializers' module
+
+
+# Set the Stripe API key from Django settings
+stripe.api_key = settings.STRIPE_SECRET_KEY
+
+# Get the custom user model
+User = get_user_model()
+
+def get_user(request):
+    # Your logic to get user
+    return JsonResponse({'user': 'user-data'})
+
+# Ride acceptance view
+class RideAcceptView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, ride_id):
+        ride = Ride.objects.get(id=ride_id)
+        if ride.status != 'requested':
+            return Response({'error': 'Ride is not available for acceptance.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        ride.driver = request.user
+        ride.status = 'accepted'
+        ride.pickup_time = timezone.now()  # Mark the pickup time
+        ride.save()
+        return Response({'status': 'Ride accepted', 'ride_id': ride.id})
+
+
+# Ride completion view
+class RideCompleteView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, ride_id):
+        ride = Ride.objects.get(id=ride_id)
+        if ride.status != 'in_progress':
+            return Response({'error': 'Ride is not in progress.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        ride.status = 'completed'
+        ride.dropoff_time = timezone.now()  # Mark the drop-off time
+        ride.save()
+
+        # Process payment (using Stripe or any other method)
+        # payment processing logic here...
+
+        return Response({'status': 'Ride completed', 'ride_id': ride.id})
+
+
+# API view to list and create rides
+class RideListCreateView(generics.ListCreateAPIView):
+    queryset = Ride.objects.all()
+    serializer_class = RideSerializer
+    permission_classes = [IsAuthenticated]
+
+    # Automatically set the passenger to the current user
+    def perform_create(self, serializer):
+        serializer.save(passenger=self.request.user)
+
+
+# API view to retrieve, update, and delete a specific ride
+class RideDetailView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = Ride.objects.all()
+    serializer_class = RideSerializer
+    permission_classes = [IsAuthenticated]
+
+    # Custom update method to handle ride status changes
+    def update(self, request, *args, **kwargs):
+        ride = self.get_object()
+        if 'status' in request.data:
+            ride.status = request.data['status']
+            ride.save()
+        serializer = self.get_serializer(ride)
+        return Response(serializer.data)
+
+
+# API view to list and create transactions
+class TransactionListView(generics.ListCreateAPIView):
+    queryset = Transaction.objects.all()
+    serializer_class = TransactionSerializer
+    permission_classes = [IsAuthenticated]
+
+    # Restrict transactions to the current user
+    def get_queryset(self):
+        return self.queryset.filter(user=self.request.user)
+
+    # Automatically set the user for the transaction to the current user
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+
+# Dashboard statistics view
+class DashboardStatsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        total_rides = Ride.objects.count()
+        completed_rides = Ride.objects.filter(status='completed').count()
+        pending_rides = Ride.objects.filter(status='requested').count()
+        canceled_rides = Ride.objects.filter(status='canceled').count()
+
+        stats = {
+            'totalRides': total_rides,
+            'completedRides': completed_rides,
+            'pendingRides': pending_rides,
+            'canceledRides': canceled_rides
+        }
+        return Response(stats, status=status.HTTP_200_OK)
+
+
+# Payment Intent View for Stripe integration
+class PaymentIntentView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        try:
+            # Create a Stripe payment intent
+            intent = stripe.PaymentIntent.create(
+                amount=5000,  # Amount in cents
+                currency='usd',
+                payment_method_types=['card'],
+            )
+            return Response({'clientSecret': intent['client_secret']})
+        except Exception as e:
+            return Response({'error': str(e)})
+
+
+# Custom registration view using a custom serializer
+class CustomRegisterView(RegistrationView):
+    serializer_class = CustomRegisterSerializer
+
+
+# API view to list all users
+class UserListView(generics.ListAPIView):
+    queryset = CustomUser.objects.all()
+    serializer_class = CustomUserSerializer
+
+
+# API view to create a new user
+class UserCreateView(generics.CreateAPIView):
+    queryset = CustomUser.objects.all()
+    serializer_class = RegisterSerializer
+
+
+# API view to list all driver licenses
+class DriverLicenseListView(generics.ListAPIView):
+    queryset = DriverLicense.objects.all()
+    serializer_class = DriverLicenseSerializer
+
+
+# API view to create a new driver license
+class DriverLicenseCreateView(generics.CreateAPIView):
+    queryset = DriverLicense.objects.all()
+    serializer_class = DriverLicenseSerializer
+
+
+# API view to list all vehicles
+class VehicleListView(generics.ListAPIView):
+    queryset = Vehicle.objects.all()
+    serializer_class = VehicleSerializer
+
+
+# API view to create a new vehicle
+class VehicleCreateView(generics.CreateAPIView):
+    queryset = Vehicle.objects.all()
+    serializer_class = VehicleSerializer
+
+
+# Custom serializer for obtaining JWT tokens with additional validation
+class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    @classmethod
+    def get_token(cls, user):
+        token = super().get_token(user)
+        # Add custom claims here if needed
+        return token
+
+    # Custom validation for email and password authentication
+    def validate(self, attrs):
+        credentials = {
+            'email': attrs.get('email'),
+            'password': attrs.get('password')
+        }
+
+        user = CustomUser.objects.filter(email=credentials['email']).first()
+
+        if user is None:
+            raise serializers.ValidationError('No user with this email found.')
+
+        if not user.check_password(credentials['password']):
+            raise serializers.ValidationError('Incorrect password.')
+
+        return super().validate(attrs)
+
+
+# Custom view to obtain JWT tokens
+class CustomTokenObtainPairView(TokenObtainPairView):
+    serializer_class = CustomTokenObtainPairSerializer
+
+
+# Function-based view to save a location
+@api_view(['POST'])
+def save_location(request):
+    try:
+        location = request.data.get('location')
+        if not location:
+            return Response({'error': 'No location provided'}, status=status.HTTP_400_BAD_REQUEST)
+        # Process location (e.g., save to database)
+        return Response({'message': 'Location saved successfully'}, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class RideAcceptView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, ride_id):
+        try:
+            ride = Ride.objects.get(id=ride_id)
+            if ride.status != 'requested':
+                return Response({'error': 'Ride is not available for acceptance.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            ride.driver = request.user
+            ride.status = 'accepted'
+            ride.pickup_time = timezone.now()  # Mark the pickup time
+            ride.save()
+            return Response({'status': 'Ride accepted', 'ride_id': ride.id})
+        except Ride.DoesNotExist:
+            return Response({'error': 'Ride not found.'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class PaymentIntentView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        try:
+            intent = stripe.PaymentIntent.create(
+                amount=5000,  # Amount in cents
+                currency='usd',
+                payment_method_types=['card'],
+            )
+            return Response({'clientSecret': intent['client_secret']})
+        except stripe.error.CardError as e:
+            return Response({'error': 'Card error: {}'.format(e.user_message)}, status=status.HTTP_400_BAD_REQUEST)
+        except stripe.error.RateLimitError:
+            return Response({'error': 'Rate limit error.'}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+        except stripe.error.InvalidRequestError:
+            return Response({'error': 'Invalid request.'}, status=status.HTTP_400_BAD_REQUEST)
+        except stripe.error.AuthenticationError:
+            return Response({'error': 'Authentication error.'}, status=status.HTTP_401_UNAUTHORIZED)
+        except stripe.error.APIConnectionError:
+            return Response({'error': 'Network communication error.'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        except stripe.error.StripeError as e:
+            return Response({'error': 'Stripe error: {}'.format(e.user_message)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
