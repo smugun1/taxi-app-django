@@ -95,6 +95,15 @@ class Ride(models.Model):
     def __str__(self):
         return f"Ride from {self.origin} to {self.destination} ({self.status})"  # String representation of the ride model
 
+class Location(models.Model):
+    name = models.CharField(max_length=255)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6)
+    description = models.TextField(blank=True)
+
+    def __str__(self):
+        return self.name
+
 # Model for storing transaction details
 class Transaction(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)  # Foreign key relationship with CustomUser

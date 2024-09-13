@@ -8,25 +8,37 @@ from rest_framework.decorators import api_view
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import get_user_model
-from django.conf import settings
-from django.shortcuts import render
 import stripe
-
+from django.conf import settings
+from rest_framework import serializers
 # from django.views import View
 from registration.backends.default.views import RegistrationView
 
-from .models import CustomUser, DriverLicense, Ride, Vehicle, Transaction
+from .models import CustomUser, DriverLicense, Location, Ride, Vehicle, Transaction
 from .serializers import (
     CustomRegisterSerializer,
     CustomUserSerializer,
     DriverLicenseSerializer,
+    LocationSerializer,
     RegisterSerializer,
     RideSerializer,
     TransactionSerializer,
     VehicleSerializer
 )
+from rest_framework.authtoken.models import Token
+from rest_framework.response import Response
+from rest_framework import status
+from django.contrib.auth import authenticate
+from rest_framework.views import APIView
+
 from users import serializers
-# Remove the redundant import of 'serializers' module
+from django.views.decorators.csrf import csrf_exempt
+from rest_framework.permissions import AllowAny
+from django.contrib.auth import authenticate, login as auth_login
+from rest_framework_simplejwt.tokens import RefreshToken
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # Set the Stripe API key from Django settings
@@ -39,20 +51,87 @@ def get_user(request):
     # Your logic to get user
     return JsonResponse({'user': 'user-data'})
 
+# # Serializer for Register
+# # Make sure your import looks like this for ModelSerializer
+# class RegisterSerializer(serializers.ModelSerializer):
+#     password = serializers.CharField(write_only=True)
+
+#     class Meta:
+#         model = User
+#         fields = ('username', 'password')
+
+#     def create(self, validated_data):
+#         user = User.objects.create_user(
+#             username=validated_data['username'],
+#             password=validated_data['password']
+#         )
+#         return user
+
+# Register View
+class RegisterView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = RegisterSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({'message': 'User registered successfully'}, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+# Login View
+class LoginView(APIView):
+    def post(self, request):
+        data = request.data
+        username = data.get('username')
+        password = data.get('password')
+
+        if not username or not password:
+            return Response({'error': 'Username and password are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = authenticate(request, username=username, password=password)
+        if user is not None:
+            token, created = Token.objects.get_or_create(user=user)
+            return Response({'token': token.key}, status=status.HTTP_200_OK)
+        else:
+            return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+
+
+# Logout View
+class LogoutView(APIView):
+    def post(self, request):
+        try:
+            request.user.auth_token.delete()
+            return Response({'message': 'Logged out successfully'}, status=status.HTTP_204_NO_CONTENT)
+        except:
+            return Response({'error': 'Failed to log out'}, status=status.HTTP_400_BAD_REQUEST)
+
+class CustomTokenObtainPairView(TokenObtainPairView):
+    """
+    A custom view for obtaining JWT tokens, allowing you to customize the response or authentication process.
+    """
+    # You can override the serializer class to use a custom serializer if needed
+    # serializer_class = TokenObtainPairSerializer
+    pass
+
 # Ride acceptance view
 class RideAcceptView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, ride_id):
-        ride = Ride.objects.get(id=ride_id)
-        if ride.status != 'requested':
-            return Response({'error': 'Ride is not available for acceptance.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            ride = Ride.objects.get(id=ride_id)
+            if ride.status != 'requested':
+                return Response({'error': 'Ride is not available for acceptance.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        ride.driver = request.user
-        ride.status = 'accepted'
-        ride.pickup_time = timezone.now()  # Mark the pickup time
-        ride.save()
-        return Response({'status': 'Ride accepted', 'ride_id': ride.id})
+            ride.driver = request.user
+            ride.status = 'accepted'
+            ride.pickup_time = timezone.now()  # Mark the pickup time
+            ride.save()
+            return Response({'status': 'Ride accepted', 'ride_id': ride.id})
+        except Ride.DoesNotExist:
+            return Response({'error': 'Ride not found.'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # Ride completion view
@@ -100,6 +179,56 @@ class RideDetailView(generics.RetrieveUpdateDestroyAPIView):
         serializer = self.get_serializer(ride)
         return Response(serializer.data)
 
+class LocationListCreateAPIView(APIView):
+    """
+    View to list all locations or create a new location.
+    """
+    def get(self, request):
+        locations = Location.objects.all()
+        serializer = LocationSerializer(locations, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        serializer = LocationSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class LocationDetailAPIView(APIView):
+    """
+    View to retrieve, update, or delete a location by ID.
+    """
+    def get_object(self, pk):
+        try:
+            return Location.objects.get(pk=pk)
+        except Location.DoesNotExist:
+            return None
+
+    def get(self, request, pk):
+        location = self.get_object(pk)
+        if location is None:
+            return Response({'error': 'Location not found'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = LocationSerializer(location)
+        return Response(serializer.data)
+
+    def put(self, request, pk):
+        location = self.get_object(pk)
+        if location is None:
+            return Response({'error': 'Location not found'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = LocationSerializer(location, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, pk):
+        location = self.get_object(pk)
+        if location is None:
+            return Response({'error': 'Location not found'}, status=status.HTTP_404_NOT_FOUND)
+        location.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 # API view to list and create transactions
 class TransactionListView(generics.ListCreateAPIView):
@@ -134,6 +263,35 @@ class DashboardStatsView(APIView):
         }
         return Response(stats, status=status.HTTP_200_OK)
 
+@csrf_exempt
+def create_checkout_session(request):
+    logger.info('Received request to create checkout session')
+    YOUR_DOMAIN = "http://localhost:3000"
+
+    try:
+        checkout_session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=[
+                {
+                    'price_data': {
+                        'currency': 'usd',
+                        'product_data': {
+                            'name': 'Sample Product',
+                        },
+                        'unit_amount': 2000,  # amount in cents
+                    },
+                    'quantity': 1,
+                },
+            ],
+            mode='payment',
+            success_url=YOUR_DOMAIN + '/success',
+            cancel_url=YOUR_DOMAIN + '/cancel',
+        )
+        return JsonResponse({
+            'id': checkout_session.id
+        })
+    except Exception as e:
+        return JsonResponse({'error': str(e)})
 
 # Payment Intent View for Stripe integration
 class PaymentIntentView(APIView):
@@ -220,8 +378,21 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 
 
 # Custom view to obtain JWT tokens
-class CustomTokenObtainPairView(TokenObtainPairView):
-    serializer_class = CustomTokenObtainPairSerializer
+class CustomTokenObtainPairView(APIView):
+    def post(self, request):
+        username = request.data.get('username')
+        password = request.data.get('password')
+
+        # Authenticate the user
+        user = authenticate(username=username, password=password)
+        if user is not None:
+            refresh = RefreshToken.for_user(user)
+            return Response({
+                'access_token': str(refresh.access_token),
+                'refresh_token': str(refresh)
+            })
+        else:
+            return Response({'error': 'Invalid credentials'}, status=status.HTTP_400_BAD_REQUEST)
 
 
 # Function-based view to save a location
@@ -236,24 +407,6 @@ def save_location(request):
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-class RideAcceptView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, ride_id):
-        try:
-            ride = Ride.objects.get(id=ride_id)
-            if ride.status != 'requested':
-                return Response({'error': 'Ride is not available for acceptance.'}, status=status.HTTP_400_BAD_REQUEST)
-
-            ride.driver = request.user
-            ride.status = 'accepted'
-            ride.pickup_time = timezone.now()  # Mark the pickup time
-            ride.save()
-            return Response({'status': 'Ride accepted', 'ride_id': ride.id})
-        except Ride.DoesNotExist:
-            return Response({'error': 'Ride not found.'}, status=status.HTTP_404_NOT_FOUND)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class PaymentIntentView(APIView):
     permission_classes = [IsAuthenticated]

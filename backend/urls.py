@@ -8,6 +8,7 @@ from rest_framework_simplejwt.views import (
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('users.urls')),  # Assuming this is your app's URL configuration
+    path('api/', include('geocoding.urls')),
     path('api/auth/', include('backend.custom_rest_auth_urls')),
 
     # Custom token obtain endpoints

@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from dj_rest_auth.registration.serializers import RegisterSerializer as DefaultRegisterSerializer
-from .models import Ride, CustomUser, DriverLicense, Vehicle, Transaction
+from .models import Location, Ride, CustomUser, DriverLicense, Vehicle, Transaction
 from django.contrib.auth import authenticate
 
 User = get_user_model()
@@ -26,20 +26,17 @@ class UserSerializer(serializers.ModelSerializer):
         fields = ['id', 'email', 'username', 'user_type', 'is_staff', 'is_active']
 
 class RegisterSerializer(serializers.ModelSerializer):
-    confirm_password = serializers.CharField(write_only=True)
+    password = serializers.CharField(write_only=True)
 
     class Meta:
-        model = CustomUser
-        fields = ('username', 'email', 'password', 'confirm_password', 'user_type')
-
-    def validate(self, data):
-        if data['password'] != data['confirm_password']:
-            raise serializers.ValidationError({"confirm_password": ["Passwords do not match."]})
-        return data
+        model = User
+        fields = ('username', 'password')
 
     def create(self, validated_data):
-        validated_data.pop('confirm_password')
-        user = CustomUser.objects.create_user(**validated_data)
+        user = User.objects.create_user(
+            username=validated_data['username'],
+            password=validated_data['password']
+        )
         return user
 
 class LoginSerializer(serializers.Serializer):
@@ -73,6 +70,11 @@ class DriverLicenseSerializer(serializers.ModelSerializer):
 class VehicleSerializer(serializers.ModelSerializer):
     class Meta:
         model = Vehicle
+        fields = '__all__'
+
+class LocationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Location
         fields = '__all__'
 
 class TransactionSerializer(serializers.ModelSerializer):

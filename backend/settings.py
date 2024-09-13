@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 import environ
 import os
 from pathlib import Path
+# from decouple import config
 
 env = environ.Env(
     # set casting, default value
@@ -25,6 +26,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Take environment variables from .env file
 environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
 
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
 
@@ -33,6 +35,9 @@ SECRET_KEY = env('SECRET_KEY')
 
 # Stripe secret key
 STRIPE_SECRET_KEY = env('STRIPE_SECRET_KEY')
+
+# Mapbox access token
+MAPBOX_ACCESS_TOKEN = env('MAPBOX_ACCESS_TOKEN')
 
 
 # SECURITY WARNING: don't run with debug turned on in production!
@@ -50,6 +55,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+
     'rest_framework',
     'rest_framework_simplejwt',
     'rest_framework.authtoken',
@@ -63,6 +69,7 @@ INSTALLED_APPS = [
     'registration',
 
     'users',
+    'geocoding',
 ]
 
 SITE_ID = 1
@@ -112,7 +119,7 @@ ACCOUNT_UNIQUE_EMAIL = True
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-     'corsheaders.middleware.CorsMiddleware',  # Add this line
+    'corsheaders.middleware.CorsMiddleware',  # Add this line
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -121,13 +128,29 @@ MIDDLEWARE = [
     'allauth.account.middleware.AccountMiddleware',  # Add this line
 ]
 
-CORS_ALLOW_ALL_ORIGINS = True
-
+# Add the domain of your frontend application
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    # Add other origins as needed
+    "http://localhost:3000",  # Frontend domain
 ]
 
+# Allow credentials
+CORS_ALLOW_CREDENTIALS = True
+
+# If you need to allow specific headers or methods
+# CORS_ALLOW_HEADERS = [
+#     'content-type',
+#     'authorization',
+#     'x-csrftoken',
+# ]
+
+# CORS_ALLOW_METHODS = [
+#     'GET',
+#     'POST',
+#     'PUT',
+#     'PATCH',
+#     'DELETE',
+#     'OPTIONS',
+# ]
 
 ROOT_URLCONF = 'backend.urls'
 
