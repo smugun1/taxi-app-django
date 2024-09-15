@@ -1,23 +1,31 @@
 from django.urls import include, path
 from rest_framework_simplejwt.views import TokenRefreshView
 
+from django.conf import settings
+from django.conf.urls.static import static
+
+from geocoding.views import geocode
 from .views import (
-    LogoutView, CustomRegisterView, CustomTokenObtainPairView,
+    DashboardStatsView, LogoutView, CustomRegisterView, CustomTokenObtainPairView,
     RideListCreateView, RideDetailView, RideAcceptView, RideCompleteView,
     LocationListCreateAPIView, LocationDetailAPIView, TransactionListView,
     PaymentIntentView, UserListView, UserCreateView, create_checkout_session, save_location,
     DriverLicenseListView, DriverLicenseCreateView, VehicleListView, VehicleCreateView
 )
-from . import views
-
+from users import views
 
 urlpatterns = [
     # Auth and User Management
-    path('auth/login/', CustomTokenObtainPairView.as_view(), name='login'),
-    # path('auth/login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),  # Keep only one login path
-    path('auth/register/', CustomRegisterView.as_view(), name='register'),  # Keep only one register path
-    path('auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
-    path('logout/', LogoutView.as_view(), name='logout'),
+    path('api/auth/login/', CustomTokenObtainPairView.as_view(), name='login'),  # Custom JWT login
+    path('api/auth/register/', CustomRegisterView.as_view(), name='register'),
+    path('api/auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('api/auth/logout/', LogoutView.as_view(), name='logout'),  # Ensure this works well with your logout mechanism
+
+    # Dashboard statistics
+    path('dashboard/stats/', DashboardStatsView.as_view(), name='dashboard-stats'),
+
+    # geocoding
+     path('api/geocode/', geocode, name='geocode'),
 
     # Rides Management
     path('rides/', RideListCreateView.as_view(), name='ride-list-create'),
@@ -30,7 +38,7 @@ urlpatterns = [
     path('api/locations/<int:pk>/', LocationDetailAPIView.as_view(), name='location-detail'),
 
     # Transactions and Payments
-    path('transactions/', TransactionListView.as_view(), name='transaction-list'),
+    path('transaction-list/', TransactionListView.as_view(), name='transaction-list'),
     path('payments/intent/', PaymentIntentView.as_view(), name='payment-intent'),
     path('create-checkout-session/', create_checkout_session, name='create-checkout-session'),
 
@@ -50,4 +58,5 @@ urlpatterns = [
 
     # Include registration URLs
     path('accounts/', include('registration.backends.default.urls')),
-]
+
+] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

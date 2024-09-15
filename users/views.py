@@ -36,6 +36,7 @@ from django.views.decorators.csrf import csrf_exempt
 from rest_framework.permissions import AllowAny
 from django.contrib.auth import authenticate, login as auth_login
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework.authentication import TokenAuthentication
 import logging
 
 logger = logging.getLogger(__name__)
@@ -51,21 +52,6 @@ def get_user(request):
     # Your logic to get user
     return JsonResponse({'user': 'user-data'})
 
-# # Serializer for Register
-# # Make sure your import looks like this for ModelSerializer
-# class RegisterSerializer(serializers.ModelSerializer):
-#     password = serializers.CharField(write_only=True)
-
-#     class Meta:
-#         model = User
-#         fields = ('username', 'password')
-
-#     def create(self, validated_data):
-#         user = User.objects.create_user(
-#             username=validated_data['username'],
-#             password=validated_data['password']
-#         )
-#         return user
 
 # Register View
 class RegisterView(APIView):
@@ -82,13 +68,13 @@ class RegisterView(APIView):
 class LoginView(APIView):
     def post(self, request):
         data = request.data
-        username = data.get('username')
+        email = data.get('email')
         password = data.get('password')
 
-        if not username or not password:
-            return Response({'error': 'Username and password are required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not email or not password:
+            return Response({'error': 'email and password are required'}, status=status.HTTP_400_BAD_REQUEST)
 
-        user = authenticate(request, username=username, password=password)
+        user = authenticate(request, email=email, password=password)
         if user is not None:
             token, created = Token.objects.get_or_create(user=user)
             return Response({'token': token.key}, status=status.HTTP_200_OK)
@@ -96,22 +82,30 @@ class LoginView(APIView):
             return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
 
 
-# Logout View
 class LogoutView(APIView):
-    def post(self, request):
-        try:
-            request.user.auth_token.delete()
-            return Response({'message': 'Logged out successfully'}, status=status.HTTP_204_NO_CONTENT)
-        except:
-            return Response({'error': 'Failed to log out'}, status=status.HTTP_400_BAD_REQUEST)
+    authentication_classes = [TokenAuthentication]
 
+    def post(self, request):
+        # Ensure the user is authenticated
+        if not request.user or not request.user.is_authenticated:
+            return Response({'error': 'User not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Attempt to delete the user's token
+        try:
+            # Ensure the user has an auth token
+            if request.user.auth_token:
+                request.user.auth_token.delete()
+            return Response({'message': 'Logged out successfully'}, status=status.HTTP_204_NO_CONTENT)
+        except Exception as e:
+            # Log the exception for debugging
+            print(f'Error during logout: {e}')
+            return Response({'error': 'Failed to log out'}, status=status.HTTP_400_BAD_REQUEST)
 class CustomTokenObtainPairView(TokenObtainPairView):
     """
     A custom view for obtaining JWT tokens, allowing you to customize the response or authentication process.
     """
     # You can override the serializer class to use a custom serializer if needed
-    # serializer_class = TokenObtainPairSerializer
-    pass
+    serializer_class = TokenObtainPairSerializer
 
 # Ride acceptance view
 class RideAcceptView(APIView):
@@ -152,6 +146,11 @@ class RideCompleteView(APIView):
 
         return Response({'status': 'Ride completed', 'ride_id': ride.id})
 
+class TransactionListView(APIView):
+    def get(self, request, *args, **kwargs):
+        transactions = Transaction.objects.all()
+        serializer = TransactionSerializer(transactions, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 # API view to list and create rides
 class RideListCreateView(generics.ListCreateAPIView):
@@ -380,11 +379,11 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 # Custom view to obtain JWT tokens
 class CustomTokenObtainPairView(APIView):
     def post(self, request):
-        username = request.data.get('username')
+        email = request.data.get('email')
         password = request.data.get('password')
 
         # Authenticate the user
-        user = authenticate(username=username, password=password)
+        user = authenticate(email=email, password=password)
         if user is not None:
             refresh = RefreshToken.for_user(user)
             return Response({
