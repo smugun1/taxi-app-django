@@ -3,7 +3,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from django.conf import settings
 from django.conf.urls.static import static
 from .views import (
-    DashboardStatsView, LogoutView, CustomRegisterView, CustomTokenObtainPairView,
+    StatsView, LogoutView, CustomRegisterView, CustomTokenObtainPairView,
     RideListCreateView, RideDetailView, RideAcceptView, RideCompleteView,
     LocationListCreateAPIView, LocationDetailAPIView, TransactionListView,
     PaymentIntentView, UserListView, UserCreateView, create_checkout_session, get_user, save_location,
@@ -21,7 +21,7 @@ urlpatterns = [
     path('api/auth/logout/', LogoutView.as_view(), name='logout'),
 
     # Dashboard statistics
-    path('dashboard/stats/', DashboardStatsView.as_view(), name='dashboard-stats'),
+    path('stats/', StatsView.as_view(), name='stats'),
 
     # Rides Management
     path('rides/', RideListCreateView.as_view(), name='ride-list-create'),

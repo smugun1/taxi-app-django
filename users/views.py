@@ -255,7 +255,7 @@ class TransactionListView(generics.ListCreateAPIView):
 
 
 # Dashboard statistics view
-class DashboardStatsView(APIView):
+class StatsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
