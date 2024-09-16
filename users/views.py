@@ -4,16 +4,20 @@ from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework.authtoken.models import Token
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework.authentication import TokenAuthentication
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import get_user_model
 import stripe
 from django.conf import settings
 from rest_framework import serializers
-# from django.views import View
+from django.contrib.auth.decorators import login_required
+from django.utils.decorators import method_decorator
 from registration.backends.default.views import RegistrationView
-
 from .models import CustomUser, DriverLicense, Location, Ride, Vehicle, Transaction
 from .serializers import (
     CustomRegisterSerializer,
@@ -25,18 +29,13 @@ from .serializers import (
     TransactionSerializer,
     VehicleSerializer
 )
-from rest_framework.authtoken.models import Token
-from rest_framework.response import Response
-from rest_framework import status
-from django.contrib.auth import authenticate
-from rest_framework.views import APIView
 
+from django.contrib.auth import authenticate
 from users import serializers
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.permissions import AllowAny
 from django.contrib.auth import authenticate, login as auth_login
-from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework.authentication import TokenAuthentication
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -48,9 +47,14 @@ stripe.api_key = settings.STRIPE_SECRET_KEY
 # Get the custom user model
 User = get_user_model()
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def get_user(request):
-    # Your logic to get user
-    return JsonResponse({'user': 'user-data'})
+    user = request.user
+    if user.is_authenticated:
+        user_data = CustomUserSerializer(user).data
+        return JsonResponse({'user': user_data})
+    return JsonResponse({'error': 'User not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
 
 
 # Register View
@@ -66,6 +70,8 @@ class RegisterView(APIView):
 
 # Login View
 class LoginView(APIView):
+    permission_classes = [AllowAny]  # Allow unauthenticated users to log in
+
     def post(self, request):
         data = request.data
         email = data.get('email')
@@ -83,23 +89,26 @@ class LoginView(APIView):
 
 
 class LogoutView(APIView):
-    authentication_classes = [TokenAuthentication]
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        # Ensure the user is authenticated
-        if not request.user or not request.user.is_authenticated:
-            return Response({'error': 'User not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
-
-        # Attempt to delete the user's token
         try:
-            # Ensure the user has an auth token
-            if request.user.auth_token:
-                request.user.auth_token.delete()
+            # Check if the user is authenticated
+            if not request.user.is_authenticated:
+                return Response({'error': 'User not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
+
+            # Blacklist the refresh token if using JWT Blacklisting
+            refresh_token = request.data.get('refresh_token')
+            if refresh_token:
+                token = RefreshToken(refresh_token)
+                token.blacklist()
+
             return Response({'message': 'Logged out successfully'}, status=status.HTTP_204_NO_CONTENT)
         except Exception as e:
-            # Log the exception for debugging
-            print(f'Error during logout: {e}')
-            return Response({'error': 'Failed to log out'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
 class CustomTokenObtainPairView(TokenObtainPairView):
     """
     A custom view for obtaining JWT tokens, allowing you to customize the response or authentication process.
@@ -156,6 +165,7 @@ class TransactionListView(APIView):
 class RideListCreateView(generics.ListCreateAPIView):
     queryset = Ride.objects.all()
     serializer_class = RideSerializer
+    authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
 
     # Automatically set the passenger to the current user
@@ -318,6 +328,8 @@ class CustomRegisterView(RegistrationView):
 class UserListView(generics.ListAPIView):
     queryset = CustomUser.objects.all()
     serializer_class = CustomUserSerializer
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
 
 
 # API view to create a new user
@@ -378,6 +390,8 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 
 # Custom view to obtain JWT tokens
 class CustomTokenObtainPairView(APIView):
+    permission_classes = [AllowAny]  # JWT login should be open to unauthenticated users
+
     def post(self, request):
         email = request.data.get('email')
         password = request.data.get('password')
